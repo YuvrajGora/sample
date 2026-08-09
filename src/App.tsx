@@ -11,6 +11,7 @@ import AdminDashboard from '@/components/dashboards/AdminDashboard';
 import AIAssistant from '@/components/AIAssistant';
 import ComplaintsView from '@/components/views/ComplaintsView';
 import ProfileView from '@/components/views/ProfileView';
+import FullMapView from '@/components/views/FullMapView';
 import UnifiedBinScanner from '@/components/UnifiedBinScanner';
 import ScanPage from '@/components/ScanPage';
 import DbTestPage from '@/components/DbTestPage';
@@ -23,6 +24,7 @@ function AppInner() {
 
   const renderTab = () => {
     if (tab === 'ai') return <AIAssistant />;
+    if (tab === 'map') return <FullMapView />;
     if (tab === 'complaints') return <ComplaintsView />;
     if (tab === 'profile') return <ProfileView />;
     if (tab === 'scanner' && user.role === 'worker') {

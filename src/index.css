@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
+@import 'leaflet/dist/leaflet.css';
 
 @tailwind base;
 @tailwind components;
@@ -272,3 +273,45 @@ h1, h2, h3, h4, h5, .font-display {
   background: conic-gradient(from 0deg, #10b981, #3b82f6, #10b981);
   animation: spinSlow 2s linear infinite;
 }
+
+/* Leaflet Custom Styling for CleanOS */
+.leaflet-popup-content-wrapper {
+  background: var(--card-solid, #ffffff);
+  color: var(--text-primary, #0f172a);
+  border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.1));
+  border-radius: 1rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+  padding: 0.25rem;
+}
+.theme-dark .leaflet-popup-content-wrapper {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.leaflet-popup-tip {
+  background: var(--card-solid, #ffffff);
+}
+.theme-dark .leaflet-popup-tip {
+  background: #0f172a;
+}
+.leaflet-container {
+  font-family: 'Inter', sans-serif;
+  z-index: 1;
+}
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  border-radius: 0.75rem !important;
+  overflow: hidden;
+}
+.leaflet-control-zoom a {
+  background: var(--card-solid, #ffffff) !important;
+  color: var(--text-primary, #0f172a) !important;
+  border-bottom: 1px solid var(--border-soft, rgba(0,0,0,0.08)) !important;
+}
+.theme-dark .leaflet-control-zoom a {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border-bottom-color: rgba(255,255,255,0.1) !important;
+}
+

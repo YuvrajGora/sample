@@ -3,10 +3,10 @@ import { useAuth, type Role } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import {
   Home, MessageSquare, QrCode, ClipboardList, UserIcon,
-  LayoutDashboard, Leaf, Moon, Sun, LogOut, Bell,
+  LayoutDashboard, Leaf, Moon, Sun, LogOut, Bell, MapPin,
 } from '@/lib/icons';
 
-export type Tab = 'home' | 'ai' | 'scanner' | 'complaints' | 'profile';
+export type Tab = 'home' | 'ai' | 'map' | 'scanner' | 'complaints' | 'profile';
 
 const navByRole: Record<Role, { key: Tab; label: string; icon: typeof Home }[]> = {
   citizen: [
@@ -23,6 +23,7 @@ const navByRole: Record<Role, { key: Tab; label: string; icon: typeof Home }[]> 
   ],
   worker: [
     { key: 'home', label: 'Home', icon: Home },
+    { key: 'map', label: 'Map', icon: MapPin },
     { key: 'ai', label: 'AI', icon: MessageSquare },
     { key: 'scanner', label: 'Scanner', icon: QrCode },
     { key: 'complaints', label: 'History', icon: ClipboardList },
@@ -30,6 +31,7 @@ const navByRole: Record<Role, { key: Tab; label: string; icon: typeof Home }[]> 
   ],
   admin: [
     { key: 'home', label: 'Dashboard', icon: LayoutDashboard },
+    { key: 'map', label: 'Map', icon: MapPin },
     { key: 'ai', label: 'AI', icon: MessageSquare },
     { key: 'complaints', label: 'Complaints', icon: ClipboardList },
     { key: 'profile', label: 'Profile', icon: UserIcon },
