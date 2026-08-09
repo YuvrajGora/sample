@@ -22,20 +22,74 @@ export default function UnifiedBinScanner({
 
   const [debugState, setDebugState] = useState<{
     raw: string;
-    len: number;
-    charCodes: string;
+    resolved: string;
     token: string;
-    dbTokens: string[];
     matchedHouseId: string | null;
     dbMatch: boolean;
-    callbackFired: boolean;
   } | null>(null);
 
   const getMapsToken = (urlStr: string): string => {
     if (!urlStr) return '';
-    const clean = urlStr.trim().split('?')[0].split('#')[0];
+    let decoded = urlStr;
+    try {
+      decoded = decodeURIComponent(urlStr);
+    } catch (e) {}
+
+    const m1 = decoded.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
+    if (m1 && m1[1]) return m1[1];
+
+    const clean = decoded.trim().split('?')[0].split('#')[0];
     const segments = clean.split('/').filter(Boolean);
-    return (segments[segments.length - 1] || '').trim();
+    const last = (segments[segments.length - 1] || '').trim();
+    return last;
+  };
+
+  const resolveRedirectUrl = async (scannedUrl: string): Promise<string> => {
+    if (!scannedUrl) return scannedUrl;
+    const trimmed = scannedUrl.trim();
+
+    if (trimmed.includes('me-qr.com') || trimmed.includes('tinyurl') || trimmed.includes('bit.ly') || trimmed.includes('t.co')) {
+      console.log('[QR Resolver] Resolving redirect for:', trimmed);
+      const qr1Url = trimmed.replace('q.me-qr.com', 'qr1.me-qr.com');
+
+      // Attempt 1: Direct HTML fetch from qr1.me-qr.com
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(qr1Url, { signal: controller.signal });
+        clearTimeout(tid);
+        const html = await res.text();
+        const mapsMatch = html.match(/https?:\/\/maps\.app\.goo\.gl\/([a-zA-Z0-9_-]+)/i);
+        if (mapsMatch) {
+          console.log('[QR Resolver] Extracted maps URL from HTML:', mapsMatch[0]);
+          return mapsMatch[0];
+        }
+      } catch (e) {
+        console.warn('[QR Resolver] Direct HTML fetch failed:', e);
+      }
+
+      // Attempt 2: unshorten.me API fallback
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch('https://unshorten.me/json/' + encodeURIComponent(trimmed), { signal: controller.signal });
+        clearTimeout(tid);
+        const json = await res.json();
+        if (json && json.resolved_url) {
+          const decoded = decodeURIComponent(json.resolved_url);
+          const mapsMatch = decoded.match(/https?:\/\/maps\.app\.goo\.gl\/([a-zA-Z0-9_-]+)/i);
+          if (mapsMatch) {
+            console.log('[QR Resolver] Extracted maps URL from unshorten API:', mapsMatch[0]);
+            return mapsMatch[0];
+          }
+          return json.resolved_url;
+        }
+      } catch (e) {
+        console.warn('[QR Resolver] unshorten API failed:', e);
+      }
+    }
+
+    return scannedUrl;
   };
 
   const processScannedCode = async (rawData: string): Promise<boolean> => {
@@ -56,10 +110,14 @@ export default function UnifiedBinScanner({
       }
     }
 
-    const scannedToken = getMapsToken(trimmed);
-    console.log('[QR Scanner] Extracted token:', scannedToken);
+    // 2. Resolve redirect URL if short link (q.me-qr.com etc.)
+    const resolvedUrl = await resolveRedirectUrl(trimmed);
+    console.log('[QR Scanner] Resolved URL:', resolvedUrl);
 
-    // 2. Client-side token and URL matching against registered houses
+    const scannedToken = getMapsToken(resolvedUrl) || getMapsToken(trimmed);
+    console.log('[QR Scanner] Maps token:', scannedToken);
+
+    // 3. Client-side token and URL matching against registered houses
     try {
       const { data: houseList, error: houseErr } = await supabase
         .from('houses')
@@ -70,10 +128,11 @@ export default function UnifiedBinScanner({
       if (houseList && houseList.length > 0) {
         const matchedHouse = houseList.find(h => {
           if (!h.qr_url) return false;
+          const dbQr = h.qr_url.trim();
           // Direct exact match
-          if (h.qr_url.trim() === trimmed) return true;
+          if (dbQr === trimmed || dbQr === resolvedUrl) return true;
           // Google Maps short-code token match
-          const dbToken = getMapsToken(h.qr_url);
+          const dbToken = getMapsToken(dbQr);
           return Boolean(scannedToken && dbToken && scannedToken === dbToken);
         });
 
@@ -94,31 +153,25 @@ export default function UnifiedBinScanner({
 
   const handleScan = async (data: string) => {
     console.log('==== [QR DECODER CALLBACK FIRED] ====');
-    console.log('1. Raw decoded QR value:', JSON.stringify(data));
-    console.log('2. Decoded value length:', data ? data.length : 0);
-    console.log('3. Character codes:', data ? Array.from(data).map(c => c.charCodeAt(0)).join(',') : '');
-    console.log('4. Decoder callback firing confirmation: TRUE');
-
     const trimmed = (data || '').trim();
-    const scannedToken = getMapsToken(trimmed);
-    console.log('5. Extracted Google Maps token:', scannedToken);
+    console.log('1. RAW QR:', JSON.stringify(trimmed));
+
+    const resolvedUrl = await resolveRedirectUrl(trimmed);
+    console.log('2. RESOLVED URL:', resolvedUrl);
+
+    const scannedToken = getMapsToken(resolvedUrl) || getMapsToken(trimmed);
+    console.log('3. MAPS TOKEN:', scannedToken);
 
     let houseList: { id: string; qr_url: string }[] = [];
-    let dbTokens: string[] = [];
     try {
       const { data: res } = await supabase.from('houses').select('id, qr_url');
-      if (res) {
-        houseList = res;
-        dbTokens = res.map(h => `${h.id}:${getMapsToken(h.qr_url)}`);
-        console.log('6. All database QR tokens:', dbTokens);
-      }
-    } catch (e) {
-      console.error('Failed to fetch DB tokens:', e);
-    }
+      if (res) houseList = res;
+    } catch (e) {}
 
     const matchedHouse = houseList.find(h => {
       if (!h.qr_url) return false;
-      if (h.qr_url.trim() === trimmed) return true;
+      const dbQr = h.qr_url.trim();
+      if (dbQr === trimmed || dbQr === resolvedUrl) return true;
       const dbToken = getMapsToken(h.qr_url);
       return Boolean(scannedToken && dbToken && scannedToken === dbToken);
     });
@@ -127,17 +180,14 @@ export default function UnifiedBinScanner({
       (trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i))?.[1]?.toUpperCase() || null
     );
 
-    console.log('7. Final matched house ID:', finalHouseId);
+    console.log('4. MATCHED HOUSE:', finalHouseId || 'NONE');
 
     setDebugState({
       raw: data,
-      len: data.length,
-      charCodes: Array.from(data).map(c => c.charCodeAt(0)).join(','),
+      resolved: resolvedUrl,
       token: scannedToken,
-      dbTokens,
       matchedHouseId: finalHouseId,
       dbMatch: Boolean(finalHouseId),
-      callbackFired: true,
     });
 
     const success = await processScannedCode(data);
@@ -179,7 +229,8 @@ export default function UnifiedBinScanner({
       {debugState && (
         <div className="mt-3 p-3 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono border border-slate-700 space-y-1 text-left">
           <div className="font-bold text-amber-400 border-b border-slate-800 pb-1">⚡ RUNTIME DEBUG PANEL</div>
-          <div><span className="text-slate-400">RAW QR VALUE:</span> {debugState.raw || '(none)'}</div>
+          <div className="truncate"><span className="text-slate-400">RAW QR VALUE:</span> {debugState.raw || '(none)'}</div>
+          <div className="truncate"><span className="text-slate-400">RESOLVED URL:</span> {debugState.resolved || '(none)'}</div>
           <div><span className="text-slate-400">EXTRACTED TOKEN:</span> {debugState.token || '(none)'}</div>
           <div><span className="text-slate-400">DB MATCH:</span> {debugState.dbMatch ? '✅ TRUE' : '❌ FALSE'}</div>
           <div><span className="text-slate-400">HOUSE:</span> {debugState.matchedHouseId || 'NONE'}</div>
