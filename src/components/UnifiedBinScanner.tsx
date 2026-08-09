@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
 import { useQRScanner } from '@/hooks/useQRScanner';
 import { ScannerModal } from '@/components/LiveQRScanner';
 import {
@@ -19,43 +20,60 @@ export default function UnifiedBinScanner({
   const [scanError, setScanError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
 
-  const handleScan = (data: string) => {
-    const match = data.trim().match(/\/scan\/(H\d+)/i) || data.trim().match(/^(H\d+)$/i);
+  const processScannedCode = async (rawData: string): Promise<boolean> => {
+    const trimmed = rawData.trim();
+    
+    // 1. Direct Regex match for standard format (H001-H020 or /scan/H001-H020)
+    const match = trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i);
     if (match && match[1]) {
       const rawId = match[1].toUpperCase();
       const num = parseInt(rawId.substring(1), 10);
-      if (num >= 1 && num <= 15) {
+      if (num >= 1 && num <= 20) {
         const houseId = `H${String(num).padStart(3, '0')}`;
         scanner.stop();
         navigate(`/scan/${houseId}`);
-        return;
+        return true;
       }
     }
-    
-    // Not a valid CleanOS house QR
-    scanner.stop();
-    setScanError("This QR code is not a registered CleanOS house QR. Please scan the QR sticker assigned to a CleanOS house.");
+
+    // 2. Database lookup for registered qr_url (e.g. Google Maps URL)
+    try {
+      const { data: house } = await supabase
+        .from('houses')
+        .select('id')
+        .eq('qr_url', trimmed)
+        .maybeSingle();
+
+      if (house) {
+        scanner.stop();
+        navigate(`/scan/${house.id}`);
+        return true;
+      }
+    } catch (e) {
+      console.error('Error matching scanned QR against houses table:', e);
+    }
+
+    return false;
+  };
+
+  const handleScan = async (data: string) => {
+    const success = await processScannedCode(data);
+    if (!success) {
+      scanner.stop();
+      setScanError("This QR code is not a registered CleanOS house QR. Please scan the QR sticker assigned to a CleanOS house.");
+    }
   };
 
   const scanner = useQRScanner(handleScan);
 
-  const handleManualSubmit = (e: React.FormEvent) => {
+  const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualEntry.trim()) return;
     
-    const match = manualEntry.trim().match(/\/scan\/(H\d+)/i) || manualEntry.trim().match(/^(H\d+)$/i);
-    if (match && match[1]) {
-      const rawId = match[1].toUpperCase();
-      const num = parseInt(rawId.substring(1), 10);
-      if (num >= 1 && num <= 15) {
-        const houseId = `H${String(num).padStart(3, '0')}`;
-        scanner.stop();
-        navigate(`/scan/${houseId}`);
-        return;
-      }
+    const success = await processScannedCode(manualEntry);
+    if (!success) {
+      setScanError("This is not a registered CleanOS house. Please enter a valid house ID (e.g., H001 to H020).");
     }
-    
-    setScanError("This is not a registered CleanOS house. Please enter a valid house ID (e.g., H001 to H015).");
   };
 
   const handleClose = () => {
@@ -159,7 +177,7 @@ export default function UnifiedBinScanner({
                 </button>
               </div>
               <div className="flex items-center justify-between">
-                <p className="text-slate-500 dark:text-slate-400 text-xs">Enter a valid CleanOS House ID (H001 to H015)</p>
+                <p className="text-slate-500 dark:text-slate-400 text-xs">Enter a valid CleanOS House ID (H001 to H020)</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -192,7 +210,7 @@ export default function UnifiedBinScanner({
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80">
             <p className="text-slate-500 dark:text-slate-400 text-xs mb-2 text-center font-medium">Demo — try a registered House ID:</p>
             <div className="flex flex-wrap gap-1.5 justify-center">
-              {['H001', 'H003', 'H007', 'H012', 'H015'].map((id) => (
+              {['H001', 'H003', 'H007', 'H012', 'H020'].map((id) => (
                 <button
                   key={id}
                   onClick={() => {
