@@ -41,7 +41,8 @@ type Complaint = {
 type Notification = {
   id: string;
   title: string;
-  body: string;
+  body?: string;
+  message?: string;
   created_at: string;
 };
 
@@ -96,7 +97,7 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
       const { data: notifData, error: notifErr } = await supabase
         .from('notifications')
         .select('*')
-        .or(`house_id.eq.${user.house_id},user_id.eq.${user.id}`)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(5);
 
@@ -271,7 +272,7 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
                     {new Date(n.created_at).toLocaleDateString()}
                   </span>
                 </div>
-                <p className="text-xs text-secondary-c mt-1">{n.body}</p>
+                <p className="text-xs text-secondary-c mt-1">{n.message || n.body || ''}</p>
               </div>
             ))}
           </div>
