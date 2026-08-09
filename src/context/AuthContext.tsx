@@ -57,13 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (profile && active) {
           const mapped: User = {
             id: profile.id,
-            name: profile.name,
+            name: profile.full_name || profile.email,
             email: profile.email,
             role: profile.role as Role,
-            avatar: profile.avatar || 'RA',
-            zone: profile.zone || undefined,
-            employeeId: profile.employee_id || undefined,
-            ward: profile.ward || undefined,
+            avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
             house_id: profile.house_id || undefined,
             created_at: profile.created_at || undefined,
           };
@@ -104,13 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (profile && active) {
           const mapped: User = {
             id: profile.id,
-            name: profile.name,
+            name: profile.full_name || profile.email,
             email: profile.email,
             role: profile.role as Role,
-            avatar: profile.avatar || 'RA',
-            zone: profile.zone || undefined,
-            employeeId: profile.employee_id || undefined,
-            ward: profile.ward || undefined,
+            avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
             house_id: profile.house_id || undefined,
             created_at: profile.created_at || undefined,
           };
