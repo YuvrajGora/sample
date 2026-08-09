@@ -20,8 +20,26 @@ export default function UnifiedBinScanner({
   const [scanError, setScanError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
 
+  const extractMapsToken = (urlStr: string): string | null => {
+    if (!urlStr) return null;
+    const m = urlStr.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/|maps\/|\/)([a-zA-Z0-9_-]{10,})/i);
+    return m ? m[1] : null;
+  };
+
+  const normalizeUrl = (urlStr: string): string => {
+    if (!urlStr) return '';
+    return urlStr
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .split('?')[0]
+      .replace(/\/+$/, '')
+      .toLowerCase();
+  };
+
   const processScannedCode = async (rawData: string): Promise<boolean> => {
     const trimmed = rawData.trim();
+    console.log('[QR Scanner] Raw scanned value:', trimmed);
     
     // 1. Direct Regex match for standard format (H001-H020, /scan/H001-H020, or domain/scan/H001-H020)
     const match = trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i);
@@ -30,56 +48,69 @@ export default function UnifiedBinScanner({
       const num = parseInt(rawId.substring(1), 10);
       if (num >= 1 && num <= 20) {
         const houseId = `H${String(num).padStart(3, '0')}`;
+        console.log('[QR Scanner] Direct regex match:', houseId);
         scanner.stop();
         navigate(`/scan/${houseId}`);
         return true;
       }
     }
 
-    // 2. Exact match check against registered qr_url
+    const scannedToken = extractMapsToken(trimmed);
+    const scannedNorm = normalizeUrl(trimmed);
+    console.log('[QR Scanner] Normalized value:', scannedNorm);
+    console.log('[QR Scanner] Extracted token:', scannedToken);
+
+    // 2. Fetch registered house QR URLs once for single-request client-side matching
     try {
-      const { data: exactHouse } = await supabase
+      const { data: houseList, error: houseErr } = await supabase
         .from('houses')
-        .select('id')
-        .eq('qr_url', trimmed)
-        .maybeSingle();
+        .select('id, qr_url');
 
-      if (exactHouse) {
-        scanner.stop();
-        navigate(`/scan/${exactHouse.id}`);
-        return true;
-      }
-    } catch (e) {
-      console.error('Error in exact qr_url lookup:', e);
-    }
+      console.log('[QR Scanner] DB fetch result count:', houseList?.length, 'error:', houseErr);
 
-    // 3. Normalized Google Maps URL short-code token extraction & precise matching
-    // Handles trailing slashes (/), query parameters (?g_st=aw, ?g_st=ic), etc.
-    const mapsTokenMatch = trimmed.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
-    if (mapsTokenMatch && mapsTokenMatch[1]) {
-      const token = mapsTokenMatch[1];
-      try {
-        const { data: tokenHouses } = await supabase
-          .from('houses')
-          .select('id, qr_url')
-          .ilike('qr_url', `%/${token}%`);
-
-        if (tokenHouses && tokenHouses.length > 0) {
-          // Precise token match check to ensure exact short-code equality
-          const matchedHouse = tokenHouses.find(h => {
-            const hTokenMatch = h.qr_url.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
-            return hTokenMatch && hTokenMatch[1] === token;
-          }) || tokenHouses[0];
-
+      if (houseList && houseList.length > 0) {
+        // Step A: Exact raw match
+        const exactMatch = houseList.find(h => h.qr_url && h.qr_url.trim() === trimmed);
+        if (exactMatch) {
+          console.log('[QR Scanner] Exact qr_url match:', exactMatch.id);
           scanner.stop();
-          navigate(`/scan/${matchedHouse.id}`);
+          navigate(`/scan/${exactMatch.id}`);
           return true;
         }
-      } catch (e) {
-        console.error('Error in normalized maps token lookup:', e);
+
+        // Step B: Precise Google Maps short-code token match
+        if (scannedToken) {
+          const tokenMatch = houseList.find(h => {
+            const dbToken = extractMapsToken(h.qr_url);
+            return dbToken && dbToken === scannedToken;
+          });
+          if (tokenMatch) {
+            console.log('[QR Scanner] Token fallback match:', tokenMatch.id);
+            scanner.stop();
+            navigate(`/scan/${tokenMatch.id}`);
+            return true;
+          }
+        }
+
+        // Step C: Normalized URL match (ignoring protocol, query params, trailing slashes)
+        if (scannedNorm) {
+          const normMatch = houseList.find(h => {
+            const dbNorm = normalizeUrl(h.qr_url);
+            return dbNorm && dbNorm === scannedNorm;
+          });
+          if (normMatch) {
+            console.log('[QR Scanner] Normalized URL match:', normMatch.id);
+            scanner.stop();
+            navigate(`/scan/${normMatch.id}`);
+            return true;
+          }
+        }
       }
+    } catch (e) {
+      console.error('[QR Scanner] Error during house lookup:', e);
     }
 
+    console.log('[QR Scanner] Lookup failed, returning false');
     return false;
   };
 
