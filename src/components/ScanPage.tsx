@@ -8,6 +8,8 @@ import {
 
 type Status = 'loading' | 'not-found' | 'ready' | 'submitting' | 'success' | 'error';
 
+import { completeScheduleForHouse } from '@/lib/pickupScheduleService';
+
 const ALLOWED_RADIUS_METERS = 50; // Configurable verification radius
 
 function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -135,6 +137,7 @@ export default function ScanPage() {
     }
 
     setHouse({ ...house, collection_status: 'Collected', last_collected: now });
+    await completeScheduleForHouse(house.id);
     setStatus('success');
   }, [house, status, alreadyCollected, coords]);
 
@@ -305,6 +308,20 @@ export default function ScanPage() {
                       <p className="leading-relaxed">
                         Worker GPS is bypassed. Manual override allowed.
                       </p>
+                    </div>
+                  )}
+
+                  {/* Open Directions Action */}
+                  {hasCoordinates && (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${house.latitude},${house.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full h-10 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
+                      >
+                        <Navigation size={14} className="text-emerald-500" /> Open Directions in Google Maps
+                      </a>
                     </div>
                   )}
                 </div>

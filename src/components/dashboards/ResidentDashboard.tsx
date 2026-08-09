@@ -3,9 +3,18 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { StatCard, SectionTitle, Badge, EmptyState } from '@/components/ui/Primitives';
 import ReportIssue from '@/components/ReportIssue';
+import MapView from '@/components/ui/MapView';
+import PickupSchedulerModal from '@/components/scheduling/PickupSchedulerModal';
+import {
+  fetchActiveScheduleForHouse,
+  subscribeToPickupSchedules,
+  cancelSchedule,
+} from '@/lib/pickupScheduleService';
+import type { PickupSchedule } from '@/lib/supabase';
 import {
   Leaf, Plus, Truck, Award, Activity, Bell, Clock, MapPin, CheckCircle2,
-  Star, AlertTriangle, Recycle, Sparkles, ChevronRight, ClipboardList, Loader2
+  Star, AlertTriangle, Recycle, Sparkles, ChevronRight, ClipboardList, Loader2, Navigation,
+  Calendar, XCircle, RefreshCw
 } from '@/lib/icons';
 
 type HouseDetails = {
@@ -15,6 +24,8 @@ type HouseDetails = {
   address: string;
   collection_status: string;
   last_collected: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 type CollectionLog = {
@@ -49,12 +60,21 @@ type Notification = {
 export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }) {
   const { user } = useAuth();
   const [reportOpen, setReportOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [activeSchedule, setActiveSchedule] = useState<PickupSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [house, setHouse] = useState<HouseDetails | null>(null);
   const [logs, setLogs] = useState<CollectionLog[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const loadSchedule = async () => {
+    if (!user?.house_id) return;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const sched = await fetchActiveScheduleForHouse(user.house_id, todayStr);
+    setActiveSchedule(sched);
+  };
 
   const fetchData = async () => {
     if (!user?.house_id) return;
@@ -104,6 +124,9 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
       if (notifErr) throw notifErr;
       setNotifications(notifData || []);
 
+      // 5. Fetch active pickup schedule
+      await loadSchedule();
+
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e.message || 'Failed to fetch dashboard data.');
@@ -114,6 +137,14 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
 
   useEffect(() => {
     fetchData();
+  }, [user?.house_id]);
+
+  useEffect(() => {
+    if (!user?.house_id) return;
+    const unsub = subscribeToPickupSchedules(() => {
+      loadSchedule();
+    });
+    return () => unsub();
   }, [user?.house_id]);
 
   if (loading) {
@@ -163,20 +194,72 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 gap-4">
-        <button onClick={() => setReportOpen(true)} className="glass-card p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <button onClick={() => setScheduleModalOpen(true)} className="glass-card p-3.5 sm:p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
+            <Calendar size={18} />
+          </div>
+          <span className="text-xs sm:text-sm font-semibold text-primary-c">Schedule Pickup</span>
+        </button>
+
+        <button onClick={() => setReportOpen(true)} className="glass-card p-3.5 sm:p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
             <Plus size={18} />
           </div>
-          <span className="text-sm font-semibold text-primary-c">Report Issue</span>
+          <span className="text-xs sm:text-sm font-semibold text-primary-c">Report Issue</span>
         </button>
-        <button onClick={onOpenAI} className="glass-card p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
+
+        <button onClick={onOpenAI} className="glass-card p-3.5 sm:p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
             <Sparkles size={18} />
           </div>
-          <span className="text-sm font-semibold text-primary-c">Ask Assistant</span>
+          <span className="text-xs sm:text-sm font-semibold text-primary-c">Ask Assistant</span>
         </button>
       </div>
+
+      {/* Real-time Scheduled Pickup Banner */}
+      {activeSchedule && (
+        <div className="glass-card p-5 border border-emerald-500/30 bg-emerald-500/10 animate-fade-up space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                Scheduled Pickup Reserved
+              </span>
+            </div>
+            <button
+              onClick={() => setScheduleModalOpen(true)}
+              className="text-xs font-bold text-emerald-500 hover:underline flex items-center gap-1"
+            >
+              <RefreshCw size={12} /> Manage
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <div>
+              <p className="text-base font-bold text-primary-c flex items-center gap-2">
+                <Clock size={16} className="text-emerald-500" />
+                Slot: {activeSchedule.slot === '07:00' ? '7:00 AM (Morning)' : '12:00 PM (Midday)'}
+              </p>
+              <p className="text-xs text-secondary-c mt-0.5">
+                Date: <span className="font-medium text-primary-c">{activeSchedule.scheduled_date}</span> · Status: <span className="font-semibold text-emerald-500 capitalize">{activeSchedule.status}</span>
+              </p>
+            </div>
+
+            <button
+              onClick={async () => {
+                if (confirm('Cancel this scheduled pickup?')) {
+                  await cancelSchedule(activeSchedule.id);
+                  loadSchedule();
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/15 text-rose-500 text-xs font-bold hover:bg-rose-500/25 transition flex items-center justify-center gap-1"
+            >
+              <XCircle size={12} /> Cancel Pickup
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Today status */}
       <div className="glass-card p-5 animate-fade-up">
@@ -205,6 +288,34 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
           </div>
         </div>
       </div>
+
+      {/* Compact Property Location Map */}
+      {house && (
+        <div className="glass-card p-5 animate-fade-up space-y-3">
+          <SectionTitle
+            title="Property Location"
+            subtitle={house.address}
+            action={
+              house.latitude && house.longitude ? (
+                <a
+                  href={`https://www.google.com/maps/dir/?api=1&destination=${house.latitude},${house.longitude}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs font-semibold text-emerald-500 hover:underline bg-emerald-500/10 px-3 py-1.5 rounded-xl"
+                >
+                  <Navigation size={13} /> Open Directions
+                </a>
+              ) : null
+            }
+          />
+          <MapView
+            houses={[house as any]}
+            selectedHouseId={house.id}
+            height="h-[200px]"
+            compact={true}
+          />
+        </div>
+      )}
 
       {/* Collection history & complaints */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -280,6 +391,17 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
       </div>
 
       {reportOpen && <ReportIssue onClose={() => { setReportOpen(false); fetchData(); }} />}
+      {house && (
+        <PickupSchedulerModal
+          house={house as any}
+          residentId={user?.id}
+          isOpen={scheduleModalOpen}
+          onClose={() => {
+            setScheduleModalOpen(false);
+            loadSchedule();
+          }}
+        />
+      )}
     </div>
   );
 }

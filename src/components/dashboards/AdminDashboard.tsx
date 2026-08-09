@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { StatCard, SectionTitle, Badge, EmptyState } from '@/components/ui/Primitives';
-import { supabase, type House, type CollectionLog } from '@/lib/supabase';
+import { supabase, type House, type CollectionLog, type PickupSchedule } from '@/lib/supabase';
+import { fetchSchedules, subscribeToPickupSchedules } from '@/lib/pickupScheduleService';
 import {
   Home, Truck, Users, AlertTriangle, Activity, TrendingUp, Sparkles,
   MapPin, ShieldCheck, Award, Gauge, ChevronRight, X, CheckCircle2, RefreshCw,
-  Navigation, Zap, AlertTriangle as Alert, Clock, ClipboardList, Loader2
+  Navigation, Zap, AlertTriangle as Alert, Clock, ClipboardList, Loader2, Calendar
 } from '@/lib/icons';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts';
+
+import MapView from '@/components/ui/MapView';
 
 export type Complaint = {
   id: string;
@@ -33,18 +36,22 @@ export default function AdminDashboard() {
   const [houses, setHouses] = useState<House[]>([]);
   const [collectionLogs, setCollectionLogs] = useState<CollectionLog[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [schedules, setSchedules] = useState<PickupSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [housesRes, logsRes, complaintsRes] = await Promise.all([
+      const [housesRes, logsRes, complaintsRes, schedulesList] = await Promise.all([
         supabase.from('houses').select('*').order('id'),
         supabase.from('collection_logs').select('*').order('collected_at', { ascending: false }),
         supabase.from('complaints').select('*').order('created_at', { ascending: false }),
+        fetchSchedules(todayStr),
       ]);
 
       if (housesRes.error) throw housesRes.error;
@@ -54,16 +61,24 @@ export default function AdminDashboard() {
       setHouses(housesRes.data ?? []);
       setCollectionLogs(logsRes.data ?? []);
       setComplaints(complaintsRes.data ?? []);
+      setSchedules(schedulesList);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch dashboard data');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [todayStr]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    const unsub = subscribeToPickupSchedules(() => {
+      fetchSchedules(todayStr).then(setSchedules);
+    });
+    return () => unsub();
+  }, [todayStr]);
 
   // Calculations
   const totalHouses = houses.length;
@@ -286,6 +301,87 @@ export default function AdminDashboard() {
         <StatCard label="Avg Performance" value={avgPerformance} suffix="%" icon={<Award size={20} />} accent="violet" delay={0.24} />
       </div>
 
+      {/* Real-time Pickup Scheduling Analytics */}
+      <div className="glass-card p-5 animate-fade-up space-y-4">
+        <SectionTitle
+          title="Today's Waste Pickup Scheduling"
+          subtitle="Real-time resident booking analytics & slot counts"
+          action={<Calendar size={18} className="text-emerald-500" />}
+        />
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+            <span className="text-xs text-secondary-c flex items-center gap-1">🌅 7:00 AM Slot</span>
+            <p className="text-xl font-bold font-mono text-primary-c mt-1">
+              {schedules.filter((s) => s.slot === '07:00').length}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <span className="text-xs text-secondary-c flex items-center gap-1">☀️ 12:00 PM Slot</span>
+            <p className="text-xl font-bold font-mono text-primary-c mt-1">
+              {schedules.filter((s) => s.slot === '12:00').length}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+            <span className="text-xs text-secondary-c">Completed</span>
+            <p className="text-xl font-bold font-mono text-emerald-500 mt-1">
+              {schedules.filter((s) => s.status === 'completed').length}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
+            <span className="text-xs text-secondary-c">Total Bookings</span>
+            <p className="text-xl font-bold font-mono text-primary-c mt-1">
+              {schedules.length}
+            </p>
+          </div>
+        </div>
+
+        {/* Detailed Booking Table */}
+        {schedules.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-soft-c text-muted-c">
+                  <th className="pb-2 font-semibold">House</th>
+                  <th className="pb-2 font-semibold">Address</th>
+                  <th className="pb-2 font-semibold">Slot</th>
+                  <th className="pb-2 font-semibold">Status</th>
+                  <th className="pb-2 font-semibold text-right">Created</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-soft-c">
+                {schedules.map((s) => {
+                  const h = houses.find((item) => item.id === s.house_id);
+                  return (
+                    <tr key={s.id} className="hover:bg-white/5 transition">
+                      <td className="py-2.5 font-bold font-mono text-primary-c">House {h?.house_number || s.house_id}</td>
+                      <td className="py-2.5 text-secondary-c truncate max-w-[160px]">{h?.address || 'Municipal Zone'}</td>
+                      <td className="py-2.5 font-semibold text-emerald-500">
+                        {s.slot === '07:00' ? '7:00 AM' : '12:00 PM'}
+                      </td>
+                      <td className="py-2.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${
+                          s.status === 'completed' ? 'bg-emerald-500/20 text-emerald-500' :
+                          s.status === 'cancelled' ? 'bg-rose-500/20 text-rose-500' : 'bg-amber-500/20 text-amber-500'
+                        }`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="py-2.5 text-muted-c text-right">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-c italic">No pickup schedules requested for today yet.</p>
+        )}
+      </div>
+
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Weekly collections bar chart */}
@@ -337,35 +433,16 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Collection heatmap + Recent collections + AI insights */}
+      {/* Municipal Interactive Map + Recent collections + AI insights */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Heatmap */}
+        {/* Heatmap / Interactive Sector Map */}
         <div className="glass-card p-5 animate-fade-up">
-          <SectionTitle title="Collection Heatmap" subtitle="Lane-wise activity intensity" action={<MapPin size={16} className="text-emerald-500" />} />
-          <div className="space-y-2.5">
-            {laneStats.map((z) => (
-              <div key={z.zone} className="flex items-center gap-3">
-                <span className="text-xs text-secondary-c w-20 truncate">{z.zone}</span>
-                <div className="flex-1 h-7 rounded-lg overflow-hidden bg-input-c relative">
-                  <div
-                    className="h-full rounded-lg transition-all duration-700 flex items-center justify-end px-2"
-                    style={{
-                      width: `${z.level}%`,
-                      background: z.level > 80 ? 'linear-gradient(90deg,#ef4444,#f59e0b)' : z.level > 55 ? 'linear-gradient(90deg,#f59e0b,#10b981)' : 'linear-gradient(90deg,#10b981,#3b82f6)',
-                    }}
-                  >
-                    <span className="text-[10px] font-semibold text-white">{z.level}%</span>
-                  </div>
-                </div>
-                <span className="text-xs text-muted-c w-12 text-right">{z.collections} col</span>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-3 mt-4 text-[10px] text-muted-c">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Low</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Medium</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> High</span>
-          </div>
+          <SectionTitle title="Sector Map & Locations" subtitle="Live municipal house collection statuses" action={<MapPin size={16} className="text-emerald-500" />} />
+          <MapView
+            houses={houses}
+            height="h-[230px]"
+            compact={true}
+          />
         </div>
 
         {/* Recent Collections */}

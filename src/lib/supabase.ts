@@ -36,3 +36,21 @@ export type CollectionLog = {
   latitude: number | null;
   longitude: number | null;
 };
+
+export type PickupSlot = '07:00' | '12:00';
+export type PickupStatus = 'scheduled' | 'completed' | 'cancelled';
+
+export type PickupSchedule = {
+  id: string;
+  house_id: string;
+  resident_id?: string | null;
+  scheduled_date: string; // YYYY-MM-DD format
+  slot: PickupSlot;
+  status: PickupStatus;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+};
+
