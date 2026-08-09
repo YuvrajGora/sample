@@ -44,7 +44,7 @@ export function useQRScanner(onScan: (data: string) => void): ScannerHook {
     }
   }, []);
 
-  const tick = useCallback(() => {
+  const tick = useCallback(async () => {
     if (doneRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -60,26 +60,43 @@ export function useQRScanner(onScan: (data: string) => void): ScannerHook {
       return;
     }
 
-    const scale = Math.min(1, MAX_SCAN_DIM / Math.max(vw, vh));
-    const sw = Math.max(1, Math.round(vw * scale));
-    const sh = Math.max(1, Math.round(vh * scale));
+    // 1. Try native BarcodeDetector API (Google Lens hardware engine) if supported
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await detector.detect(video);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          const raw = barcodes[0].rawValue;
+          console.log('[useQRScanner] BarcodeDetector decoded QR value:', raw);
+          doneRef.current = true;
+          setScannedData(raw);
+          stop();
+          onScanRef.current(raw);
+          return;
+        }
+      } catch (e) {
+        // Fallback to canvas jsQR
+      }
+    }
 
-    canvas.width = sw;
-    canvas.height = sh;
+    // 2. Fallback to jsQR canvas decoding (use full resolution for dense Google Maps QRs)
+    canvas.width = vw;
+    canvas.height = vh;
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
       rafRef.current = requestAnimationFrame(tick);
       return;
     }
-    ctx.drawImage(video, 0, 0, sw, sh);
-    const imageData = ctx.getImageData(0, 0, sw, sh);
+    ctx.drawImage(video, 0, 0, vw, vh);
+    const imageData = ctx.getImageData(0, 0, vw, vh);
 
     const code = jsQR(imageData.data, imageData.width, imageData.height, {
       inversionAttempts: 'attemptBoth',
     });
 
     if (code && code.data) {
+      console.log('[useQRScanner] jsQR decoded QR value:', code.data);
       doneRef.current = true;
       setScannedData(code.data);
       stop();

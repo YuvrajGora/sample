@@ -20,6 +20,17 @@ export default function UnifiedBinScanner({
   const [scanError, setScanError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
 
+  const [debugState, setDebugState] = useState<{
+    raw: string;
+    len: number;
+    charCodes: string;
+    token: string;
+    dbTokens: string[];
+    matchedHouseId: string | null;
+    dbMatch: boolean;
+    callbackFired: boolean;
+  } | null>(null);
+
   const getMapsToken = (urlStr: string): string => {
     if (!urlStr) return '';
     const clean = urlStr.trim().split('?')[0].split('#')[0];
@@ -82,6 +93,53 @@ export default function UnifiedBinScanner({
   };
 
   const handleScan = async (data: string) => {
+    console.log('==== [QR DECODER CALLBACK FIRED] ====');
+    console.log('1. Raw decoded QR value:', JSON.stringify(data));
+    console.log('2. Decoded value length:', data ? data.length : 0);
+    console.log('3. Character codes:', data ? Array.from(data).map(c => c.charCodeAt(0)).join(',') : '');
+    console.log('4. Decoder callback firing confirmation: TRUE');
+
+    const trimmed = (data || '').trim();
+    const scannedToken = getMapsToken(trimmed);
+    console.log('5. Extracted Google Maps token:', scannedToken);
+
+    let houseList: { id: string; qr_url: string }[] = [];
+    let dbTokens: string[] = [];
+    try {
+      const { data: res } = await supabase.from('houses').select('id, qr_url');
+      if (res) {
+        houseList = res;
+        dbTokens = res.map(h => `${h.id}:${getMapsToken(h.qr_url)}`);
+        console.log('6. All database QR tokens:', dbTokens);
+      }
+    } catch (e) {
+      console.error('Failed to fetch DB tokens:', e);
+    }
+
+    const matchedHouse = houseList.find(h => {
+      if (!h.qr_url) return false;
+      if (h.qr_url.trim() === trimmed) return true;
+      const dbToken = getMapsToken(h.qr_url);
+      return Boolean(scannedToken && dbToken && scannedToken === dbToken);
+    });
+
+    const finalHouseId = matchedHouse ? matchedHouse.id : (
+      (trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i))?.[1]?.toUpperCase() || null
+    );
+
+    console.log('7. Final matched house ID:', finalHouseId);
+
+    setDebugState({
+      raw: data,
+      len: data.length,
+      charCodes: Array.from(data).map(c => c.charCodeAt(0)).join(','),
+      token: scannedToken,
+      dbTokens,
+      matchedHouseId: finalHouseId,
+      dbMatch: Boolean(finalHouseId),
+      callbackFired: true,
+    });
+
     const success = await processScannedCode(data);
     if (!success) {
       scanner.stop();
@@ -117,6 +175,17 @@ export default function UnifiedBinScanner({
       isScanning={showOverlay}
       scanner={scanner}
     >
+      {/* Temporary Visible Debug Panel */}
+      {debugState && (
+        <div className="mt-3 p-3 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono border border-slate-700 space-y-1 text-left">
+          <div className="font-bold text-amber-400 border-b border-slate-800 pb-1">⚡ RUNTIME DEBUG PANEL</div>
+          <div><span className="text-slate-400">RAW QR VALUE:</span> {debugState.raw || '(none)'}</div>
+          <div><span className="text-slate-400">EXTRACTED TOKEN:</span> {debugState.token || '(none)'}</div>
+          <div><span className="text-slate-400">DB MATCH:</span> {debugState.dbMatch ? '✅ TRUE' : '❌ FALSE'}</div>
+          <div><span className="text-slate-400">HOUSE:</span> {debugState.matchedHouseId || 'NONE'}</div>
+        </div>
+      )}
+
       {showOverlay && !showManual && (
         <div className="text-center mt-4">
           <p className="text-slate-800 dark:text-slate-200 text-sm font-semibold">Align the House QR within the frame</p>
