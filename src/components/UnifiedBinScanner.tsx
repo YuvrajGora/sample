@@ -23,7 +23,7 @@ export default function UnifiedBinScanner({
   const processScannedCode = async (rawData: string): Promise<boolean> => {
     const trimmed = rawData.trim();
     
-    // 1. Direct Regex match for standard format (H001-H020 or /scan/H001-H020)
+    // 1. Direct Regex match for standard format (H001-H020, /scan/H001-H020, or domain/scan/H001-H020)
     const match = trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i);
     if (match && match[1]) {
       const rawId = match[1].toUpperCase();
@@ -36,21 +36,48 @@ export default function UnifiedBinScanner({
       }
     }
 
-    // 2. Database lookup for registered qr_url (e.g. Google Maps URL)
+    // 2. Exact match check against registered qr_url
     try {
-      const { data: house } = await supabase
+      const { data: exactHouse } = await supabase
         .from('houses')
         .select('id')
         .eq('qr_url', trimmed)
         .maybeSingle();
 
-      if (house) {
+      if (exactHouse) {
         scanner.stop();
-        navigate(`/scan/${house.id}`);
+        navigate(`/scan/${exactHouse.id}`);
         return true;
       }
     } catch (e) {
-      console.error('Error matching scanned QR against houses table:', e);
+      console.error('Error in exact qr_url lookup:', e);
+    }
+
+    // 3. Normalized Google Maps URL short-code token extraction & precise matching
+    // Handles trailing slashes (/), query parameters (?g_st=aw, ?g_st=ic), etc.
+    const mapsTokenMatch = trimmed.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
+    if (mapsTokenMatch && mapsTokenMatch[1]) {
+      const token = mapsTokenMatch[1];
+      try {
+        const { data: tokenHouses } = await supabase
+          .from('houses')
+          .select('id, qr_url')
+          .ilike('qr_url', `%/${token}%`);
+
+        if (tokenHouses && tokenHouses.length > 0) {
+          // Precise token match check to ensure exact short-code equality
+          const matchedHouse = tokenHouses.find(h => {
+            const hTokenMatch = h.qr_url.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
+            return hTokenMatch && hTokenMatch[1] === token;
+          }) || tokenHouses[0];
+
+          scanner.stop();
+          navigate(`/scan/${matchedHouse.id}`);
+          return true;
+        }
+      } catch (e) {
+        console.error('Error in normalized maps token lookup:', e);
+      }
     }
 
     return false;
