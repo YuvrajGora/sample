@@ -43,79 +43,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session check
     let active = true;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!active) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!active) return;
 
-      if (session) {
-        // Fetch user profile from public.users
-        const { data: profile, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
+        if (session) {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .maybeSingle();
 
-        if (profile && active) {
-          const mapped: User = {
-            id: profile.id,
-            name: profile.full_name || profile.email,
-            email: profile.email,
-            role: profile.role as Role,
-            avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
-            house_id: profile.house_id || undefined,
-            created_at: profile.created_at || undefined,
-          };
-          setUser(mapped);
-          localStorage.setItem('cleanos-user', JSON.stringify(mapped));
-        } else if (active) {
-          setUser(null);
-          localStorage.removeItem('cleanos-user');
-        }
-      } else {
-        const saved = localStorage.getItem('cleanos-user');
-        if (saved && active) {
-          const parsed = JSON.parse(saved) as User;
-          if (parsed.role === 'resident') {
+          if (profile && active) {
+            const mapped: User = {
+              id: profile.id,
+              name: profile.full_name || profile.email,
+              email: profile.email,
+              role: profile.role as Role,
+              avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
+              house_id: profile.house_id || undefined,
+              created_at: profile.created_at || undefined,
+            };
+            setUser(mapped);
+            localStorage.setItem('cleanos-user', JSON.stringify(mapped));
+          } else if (active) {
             setUser(null);
             localStorage.removeItem('cleanos-user');
-          } else {
-            setUser(parsed);
           }
-        } else if (active) {
-          setUser(null);
+        } else {
+          const saved = localStorage.getItem('cleanos-user');
+          if (saved && active) {
+            const parsed = JSON.parse(saved) as User;
+            if (parsed.role === 'resident') {
+              setUser(null);
+              localStorage.removeItem('cleanos-user');
+            } else {
+              setUser(parsed);
+            }
+          } else if (active) {
+            setUser(null);
+          }
         }
+      } catch (err) {
+        console.error('[AuthContext] getSession error:', err);
+        if (active) setUser(null);
+      } finally {
+        if (active) setLoading(false);
       }
-      setLoading(false);
     })();
 
-    // Listen for auth state changes
+    // Listen for auth state changes and resolve loading after every transition
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!active) return;
-      
-      if (session) {
-        const { data: profile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
 
-        if (profile && active) {
-          const mapped: User = {
-            id: profile.id,
-            name: profile.full_name || profile.email,
-            email: profile.email,
-            role: profile.role as Role,
-            avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
-            house_id: profile.house_id || undefined,
-            created_at: profile.created_at || undefined,
-          };
-          setUser(mapped);
-          localStorage.setItem('cleanos-user', JSON.stringify(mapped));
-        }
-      } else {
-        if (active) {
+      try {
+        if (session) {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (!active) return;
+
+          if (profile) {
+            const mapped: User = {
+              id: profile.id,
+              name: profile.full_name || profile.email,
+              email: profile.email,
+              role: profile.role as Role,
+              avatar: (profile.full_name || profile.email || 'U').slice(0, 2).toUpperCase(),
+              house_id: profile.house_id || undefined,
+              created_at: profile.created_at || undefined,
+            };
+            setUser(mapped);
+            localStorage.setItem('cleanos-user', JSON.stringify(mapped));
+          } else {
+            // Session exists but no profile row — sign out to avoid stuck state
+            console.warn('[AuthContext] No profile found for session user', session.user.id);
+            setUser(null);
+            localStorage.removeItem('cleanos-user');
+          }
+        } else {
           setUser(null);
           localStorage.removeItem('cleanos-user');
         }
+      } catch (err) {
+        console.error('[AuthContext] onAuthStateChange error:', err);
+        if (active) setUser(null);
+      } finally {
+        // Always resolve loading — this unblocks login() which sets loading=true
+        if (active) setLoading(false);
       }
     });
 
@@ -195,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return { error: 'Security alert: Profile is not authorized for this house.' };
         }
 
+        // Success: onAuthStateChange will fire and call setLoading(false)
         return {};
       }
       
