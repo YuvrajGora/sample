@@ -180,7 +180,7 @@ export function ScannerModal({
 
       {/* Bottom panel */}
       <div className="relative z-10 -mt-6 pb-[env(safe-area-inset-bottom)]">
-        <div className="glass-card rounded-t-3xl border-b-0 p-5 pt-6 max-w-md mx-auto" style={{ background: 'var(--glass-bg)' }}>
+        <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 rounded-t-3xl p-5 pt-6 max-w-md mx-auto shadow-2xl text-slate-900 dark:text-white">
           {children}
         </div>
       </div>
