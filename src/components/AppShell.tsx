@@ -15,6 +15,12 @@ const navByRole: Record<Role, { key: Tab; label: string; icon: typeof Home }[]> 
     { key: 'complaints', label: 'Complaints', icon: ClipboardList },
     { key: 'profile', label: 'Profile', icon: UserIcon },
   ],
+  resident: [
+    { key: 'home', label: 'Home', icon: Home },
+    { key: 'ai', label: 'AI', icon: MessageSquare },
+    { key: 'complaints', label: 'Complaints', icon: ClipboardList },
+    { key: 'profile', label: 'Profile', icon: UserIcon },
+  ],
   worker: [
     { key: 'home', label: 'Home', icon: Home },
     { key: 'ai', label: 'AI', icon: MessageSquare },
@@ -32,6 +38,7 @@ const navByRole: Record<Role, { key: Tab; label: string; icon: typeof Home }[]> 
 
 const roleLabel: Record<Role, string> = {
   citizen: 'Citizen',
+  resident: 'Resident',
   worker: 'Sanitation Worker',
   admin: 'Municipal Admin',
 };

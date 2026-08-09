@@ -4,6 +4,8 @@ import {
   CheckCircle2, ArrowRight, MapPin, RefreshCw, Image, Send,
 } from '@/lib/icons';
 import { Badge } from '@/components/ui/Primitives';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 
 type Phase = 'capture' | 'form' | 'processing' | 'result';
 
@@ -18,6 +20,7 @@ const sampleResult = {
 };
 
 export default function ReportIssue({ onClose }: { onClose: () => void }) {
+  const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>('capture');
   const [progress, setProgress] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -38,47 +41,35 @@ export default function ReportIssue({ onClose }: { onClose: () => void }) {
     setCameraActive(false);
   }, []);
 
-  const startCamera = useCallback(async () => {
+  const startCamera = async () => {
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: 'environment' },
         audio: false,
       });
       streamRef.current = stream;
-      setCameraActive(true);
-      // Wait for next tick so videoRef is rendered
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute('playsinline', 'true');
-          videoRef.current.play();
-        }
-      }, 50);
-    } catch (e) {
-      const err = e as Error;
-      if (err.name === 'NotAllowedError') {
-        setCameraError('Camera access denied. Please allow camera permissions or upload from gallery.');
-      } else if (err.name === 'NotFoundError') {
-        setCameraError('No camera found on this device. Try uploading from gallery instead.');
-      } else {
-        setCameraError('Could not start camera. You can upload from gallery instead.');
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
       }
+      setCameraActive(true);
+    } catch (err: any) {
+      setCameraError(err.message || 'Could not access camera');
     }
-  }, []);
+  };
 
   const capturePhoto = () => {
-    const video = videoRef.current;
-    if (!video) return;
+    if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = videoRef.current.videoWidth || 640;
+    canvas.height = videoRef.current.videoHeight || 480;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    setCapturedImage(canvas.toDataURL('image/jpeg', 0.85));
-    stopCamera();
-    setPhase('form');
+    if (ctx) {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      setCapturedImage(canvas.toDataURL('image/jpeg'));
+      stopCamera();
+      setPhase('form');
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,6 +86,31 @@ export default function ReportIssue({ onClose }: { onClose: () => void }) {
   const startProcessing = () => {
     setPhase('processing');
     setProgress(0);
+    
+    // Save complaint to the real Supabase database
+    const house_id = user?.house_id || null;
+    const reporter_email = user?.email || 'anonymous@cleanos.city';
+    const reporter_name = user?.name || 'Anonymous';
+    
+    supabase.from('complaints').insert({
+      reporter_email,
+      reporter_name,
+      address,
+      bin_number: binNumber || null,
+      description: description || null,
+      waste_type: sampleResult.wasteType,
+      overflow: sampleResult.overflow,
+      priority: sampleResult.priority,
+      status: sampleResult.status,
+      summary: sampleResult.summary,
+      image_data: capturedImage,
+      house_id
+    }).then(({ error }) => {
+      if (error) {
+        console.error('Failed to save complaint to Supabase:', error.message);
+      }
+    });
+
     const interval = setInterval(() => {
       setProgress((p) => {
         if (p >= 100) {

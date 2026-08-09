@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from '@/context/AuthContext';
 import Login from '@/components/Login';
 import AppShell, { type Tab } from '@/components/AppShell';
 import CitizenDashboard from '@/components/dashboards/CitizenDashboard';
+import ResidentDashboard from '@/components/dashboards/ResidentDashboard';
 import WorkerDashboard from '@/components/dashboards/WorkerDashboard';
 import AdminDashboard from '@/components/dashboards/AdminDashboard';
 import AIAssistant from '@/components/AIAssistant';
@@ -28,6 +29,7 @@ function AppInner() {
       return <UnifiedBinScanner role="worker" onClose={() => setTab('home')} />;
     }
     // home
+    if (user.role === 'resident') return <ResidentDashboard onOpenAI={() => setTab('ai')} />;
     if (user.role === 'citizen') return <CitizenDashboard onOpenAI={() => setTab('ai')} />;
     if (user.role === 'worker') return <WorkerDashboard onOpenScanner={() => setTab('scanner')} />;
     return <AdminDashboard />;

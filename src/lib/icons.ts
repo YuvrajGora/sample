@@ -5,7 +5,7 @@ import {
   Settings, LogOut, Moon, Sun, Plus, Camera, CameraOff, RefreshCw, Send, Search, X, ChevronRight,
   TrendingUp, Zap, ShieldCheck, Gauge, Trash, Sparkles, Image, FileText,
   CheckCircle, ArrowRight, Star, Filter, Download, Calendar, Route, CheckSquare, Square,
-  Keyboard, Loader2, ArrowLeft, Database,
+  Keyboard, Loader2, ArrowLeft, Database, Lock, Key,
 } from 'lucide-react';
 
 export {
@@ -15,5 +15,5 @@ export {
   Settings, LogOut, Moon, Sun, Plus, Camera, CameraOff, RefreshCw, Send, Search, X, ChevronRight,
   TrendingUp, Zap, ShieldCheck, Gauge, Trash, Sparkles, Image, FileText,
   CheckCircle, ArrowRight, Star, Filter, Download, Calendar, Route, CheckSquare, Square,
-  Keyboard, Loader2, ArrowLeft, Database,
+  Keyboard, Loader2, ArrowLeft, Database, Lock, Key,
 }

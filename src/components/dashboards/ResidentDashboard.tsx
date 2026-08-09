@@ -1,0 +1,284 @@
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { StatCard, SectionTitle, Badge, EmptyState } from '@/components/ui/Primitives';
+import ReportIssue from '@/components/ReportIssue';
+import {
+  Leaf, Plus, Truck, Award, Activity, Bell, Clock, MapPin, CheckCircle2,
+  Star, AlertTriangle, Recycle, Sparkles, ChevronRight, ClipboardList, Loader2
+} from '@/lib/icons';
+
+type HouseDetails = {
+  id: string;
+  lane: string;
+  house_number: string;
+  address: string;
+  collection_status: string;
+  last_collected: string | null;
+};
+
+type CollectionLog = {
+  id: string;
+  collected_at: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+type Complaint = {
+  id: string;
+  reporter_email: string;
+  reporter_name: string;
+  address: string;
+  bin_number: string | null;
+  description: string | null;
+  waste_type: string;
+  overflow: number;
+  priority: string;
+  status: string;
+  created_at: string;
+};
+
+type Notification = {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+};
+
+export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }) {
+  const { user } = useAuth();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [house, setHouse] = useState<HouseDetails | null>(null);
+  const [logs, setLogs] = useState<CollectionLog[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    if (!user?.house_id) return;
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      // 1. Fetch house
+      const { data: houseData, error: houseErr } = await supabase
+        .from('houses')
+        .select('*')
+        .eq('id', user.house_id)
+        .maybeSingle();
+
+      if (houseErr) throw houseErr;
+      setHouse(houseData);
+
+      // 2. Fetch collection history
+      const { data: logsData, error: logsErr } = await supabase
+        .from('collection_logs')
+        .select('*')
+        .eq('house_id', user.house_id)
+        .order('collected_at', { ascending: false })
+        .limit(5);
+
+      if (logsErr) throw logsErr;
+      setLogs(logsData || []);
+
+      // 3. Fetch complaints
+      const { data: complaintsData, error: compErr } = await supabase
+        .from('complaints')
+        .select('*')
+        .eq('house_id', user.house_id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (compErr) throw compErr;
+      setComplaints(complaintsData || []);
+
+      // 4. Fetch notifications
+      const { data: notifData, error: notifErr } = await supabase
+        .from('notifications')
+        .select('*')
+        .or(`house_id.eq.${user.house_id},user_id.eq.${user.id}`)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (notifErr) throw notifErr;
+      setNotifications(notifData || []);
+
+    } catch (e: any) {
+      console.error(e);
+      setErrorMsg(e.message || 'Failed to fetch dashboard data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [user?.house_id]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <Loader2 className="animate-spin text-emerald-500" size={32} />
+        <p className="text-sm text-secondary-c">Syncing house database...</p>
+      </div>
+    );
+  }
+
+  if (errorMsg) {
+    return (
+      <div className="glass-card p-6 border border-rose-500/20 text-center space-y-4">
+        <AlertTriangle className="text-rose-500 mx-auto" size={36} />
+        <h3 className="font-bold text-primary-c">Database Error</h3>
+        <p className="text-sm text-secondary-c">{errorMsg}</p>
+        <button onClick={fetchData} className="px-4 py-2 bg-emerald-500 text-white rounded-xl font-semibold text-sm hover:bg-emerald-600 transition">
+          Retry Sync
+        </button>
+      </div>
+    );
+  }
+
+  const isCollectedToday = house?.collection_status === 'Collected';
+
+  return (
+    <div className="space-y-6">
+      {/* Welcome & House details */}
+      <div className="glass-card p-5 sm:p-6 relative overflow-hidden animate-fade-up">
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-emerald-400/20 blur-2xl pointer-events-none" />
+        <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-muted-c uppercase tracking-wider font-semibold">Registered Property</p>
+            <h1 className="text-2xl font-bold font-display text-primary-c mt-0.5">
+              House {house?.house_number || user?.name}
+            </h1>
+            <p className="text-xs text-muted-c mt-1 flex items-center gap-1">
+              <MapPin size={12} className="text-emerald-500" /> {house?.address || 'CleanOS Municipal Area'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-c">Lane:</span>
+            <Badge status={house?.lane || 'Lane A'} />
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-2 gap-4">
+        <button onClick={() => setReportOpen(true)} className="glass-card p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
+            <Plus size={18} />
+          </div>
+          <span className="text-sm font-semibold text-primary-c">Report Issue</span>
+        </button>
+        <button onClick={onOpenAI} className="glass-card p-4 flex flex-col items-start gap-2 hover:scale-[1.02] transition group">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition">
+            <Sparkles size={18} />
+          </div>
+          <span className="text-sm font-semibold text-primary-c">Ask Assistant</span>
+        </button>
+      </div>
+
+      {/* Today status */}
+      <div className="glass-card p-5 animate-fade-up">
+        <SectionTitle title="Today's Collection Status" subtitle="Live updates from your sector" />
+        <div className={`flex items-center gap-4 p-4 rounded-2xl border ${
+          isCollectedToday 
+            ? 'bg-emerald-500/10 border-emerald-400/20' 
+            : 'bg-amber-500/10 border-amber-400/20'
+        }`}>
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${
+            isCollectedToday ? 'bg-emerald-500/20 text-emerald-500' : 'bg-amber-500/20 text-amber-500'
+          }`}>
+            <Truck size={26} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-primary-c">{house?.collection_status || 'Pending'}</p>
+              <Badge status={house?.collection_status || 'Pending'} />
+            </div>
+            <p className="text-xs text-secondary-c mt-0.5 truncate">
+              {isCollectedToday 
+                ? `Last collected: ${house?.last_collected ? new Date(house.last_collected).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Today'}`
+                : 'Collection scheduled for today'
+              }
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Collection history & complaints */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Collection history */}
+        <div className="glass-card p-5 animate-fade-up">
+          <SectionTitle title="Collection History" />
+          {logs.length === 0 ? (
+            <EmptyState icon={<Clock size={20} />} title="No Collection Logs" subtitle="No waste collection records found for this property." />
+          ) : (
+            <div className="space-y-4">
+              {logs.map((log) => (
+                <div key={log.id} className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-emerald-500 bg-emerald-500/15">
+                    <CheckCircle2 size={16} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-primary-c">Garbage Collected</p>
+                    <p className="text-xs text-muted-c">
+                      {new Date(log.collected_at).toLocaleDateString()} at {new Date(log.collected_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* My Complaints */}
+        <div className="glass-card p-5 animate-fade-up">
+          <SectionTitle title="Property Complaints" />
+          {complaints.length === 0 ? (
+            <EmptyState icon={<ClipboardList size={20} />} title="No Complaints Filed" subtitle="Your property has not reported any active garbage issues." />
+          ) : (
+            <div className="space-y-3">
+              {complaints.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 p-3 rounded-2xl bg-input-c border border-soft-c">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-muted-c truncate max-w-[80px]">CMP-{c.id.substring(0,4)}</span>
+                      <Badge status={c.priority} />
+                    </div>
+                    <p className="text-sm text-primary-c mt-0.5 truncate">{c.waste_type}</p>
+                    <p className="text-xs text-muted-c mt-0.5 truncate">{c.address}</p>
+                  </div>
+                  <Badge status={c.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Notifications */}
+      <div className="glass-card p-5 animate-fade-up">
+        <SectionTitle title="Notifications" />
+        {notifications.length === 0 ? (
+          <EmptyState icon={<Bell size={20} />} title="No Notifications" subtitle="You are all caught up." />
+        ) : (
+          <div className="space-y-3">
+            {notifications.map((n) => (
+              <div key={n.id} className="p-3 rounded-2xl bg-input-c border border-soft-c">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-primary-c">{n.title}</p>
+                  <span className="text-[10px] text-muted-c shrink-0">
+                    {new Date(n.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-xs text-secondary-c mt-1">{n.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {reportOpen && <ReportIssue onClose={() => { setReportOpen(false); fetchData(); }} />}
+    </div>
+  );
+}

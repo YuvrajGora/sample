@@ -1,23 +1,78 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { SectionTitle, Badge, EmptyState } from '@/components/ui/Primitives';
-import { complaints as initialComplaints, collectionHistory, type Complaint } from '@/lib/mockData';
+import { complaints as initialComplaints, collectionHistory } from '@/lib/mockData';
+import { supabase } from '@/lib/supabase';
 import {
   ClipboardList, MapPin, Search, AlertTriangle, Truck, CheckCircle2,
-  X, Send, MessageSquare, UserIcon, Clock, ChevronRight,
+  X, Send, MessageSquare, UserIcon, Clock, ChevronRight, Loader2,
 } from '@/lib/icons';
 
 type Reply = { text: string; at: string; author: string };
+
+type Complaint = {
+  id: string;
+  type: string;
+  location: string;
+  reportedAt: string;
+  priority: 'High' | 'Medium' | 'Low';
+  status: string;
+  assignedTo?: string;
+  summary: string;
+  description?: string;
+};
 
 export default function ComplaintsView() {
   const { user } = useAuth();
   const role = user!.role;
   const [filter, setFilter] = useState<string>('All');
   const [query, setQuery] = useState('');
-  const [list, setList] = useState<Complaint[]>(initialComplaints);
+  const [list, setList] = useState<Complaint[]>([]);
+  const [loading, setLoading] = useState(true);
   const [replies, setReplies] = useState<Record<string, Reply[]>>({});
   const [selected, setSelected] = useState<Complaint | null>(null);
   const [replyText, setReplyText] = useState('');
+
+  useEffect(() => {
+    if (role === 'worker') {
+      setLoading(false);
+      return;
+    }
+    
+    let active = true;
+    (async () => {
+      setLoading(true);
+      let q = supabase.from('complaints').select('*');
+      if (role === 'resident') {
+        q = q.eq('house_id', user!.house_id);
+      }
+      
+      const { data, error } = await q.order('created_at', { ascending: false });
+      if (error) {
+        console.error('Error fetching complaints:', error.message);
+        setLoading(false);
+        return;
+      }
+      
+      if (active && data) {
+        const mapped: Complaint[] = data.map((c) => ({
+          id: `CMP-${c.id.substring(0, 6).toUpperCase()}`,
+          type: c.waste_type || 'Waste Report',
+          location: c.address || 'Registered House',
+          reportedAt: new Date(c.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
+          priority: (c.priority || 'Medium') as any,
+          status: c.status || 'Pending',
+          summary: c.summary || c.description || 'No description provided',
+        }));
+        setList(mapped);
+      }
+      setLoading(false);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [role, user?.house_id]);
 
   const filters = ['All', 'Pending', 'In Progress', 'Assigned', 'Resolved'];
 
@@ -87,7 +142,12 @@ export default function ComplaintsView() {
       )}
 
       {/* List */}
-      {role === 'worker' ? (
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <Loader2 className="animate-spin text-emerald-500" size={32} />
+          <p className="text-sm text-secondary-c">Syncing complaints...</p>
+        </div>
+      ) : role === 'worker' ? (
         <div className="space-y-2.5 stagger">
           {collectionHistory.map((c) => (
             <div key={c.id} className="glass-card p-4 flex items-center gap-3">

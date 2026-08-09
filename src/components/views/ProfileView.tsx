@@ -8,6 +8,7 @@ import {
 
 const roleLabel: Record<string, string> = {
   citizen: 'Citizen',
+  resident: 'Resident',
   worker: 'Sanitation Worker',
   admin: 'Municipal Admin',
 };
@@ -17,7 +18,9 @@ export default function ProfileView() {
   const { theme, toggle } = useTheme();
   const role = user!.role;
 
-  const stats = role === 'citizen'
+  const stats = role === 'resident'
+    ? [{ label: 'House ID', value: user?.house_id || 'H001', icon: Award, accent: 'emerald' }, { label: 'Lane', value: user?.zone || 'Lane A', icon: MapPin, accent: 'blue' }, { label: 'Status', value: 'Verified', icon: CheckCircle2, accent: 'amber' }]
+    : role === 'citizen'
     ? [{ label: 'Green Points', value: '1,240', icon: Award, accent: 'amber' }, { label: 'Reports Filed', value: '7', icon: AlertTriangle, accent: 'blue' }, { label: 'Recycling Streak', value: '12 days', icon: Recycle, accent: 'emerald' }]
     : role === 'worker'
     ? [{ label: 'Collections Today', value: '38', icon: Truck, accent: 'emerald' }, { label: 'Rating', value: '4.8 ★', icon: Star, accent: 'amber' }, { label: 'Employee ID', value: 'SW-2041', icon: ShieldCheck, accent: 'blue' }]
