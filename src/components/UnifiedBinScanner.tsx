@@ -26,22 +26,50 @@ export default function UnifiedBinScanner({
     token: string;
     matchedHouseId: string | null;
     dbMatch: boolean;
+    failureReason: string | null;
   } | null>(null);
 
-  const getMapsToken = (urlStr: string): string => {
-    if (!urlStr) return '';
-    let decoded = urlStr;
-    try {
-      decoded = decodeURIComponent(urlStr);
-    } catch (e) {}
+  const RESERVED_WORDS = new Set(['ml', 'search', 'place', 'maps', 'consent', 'continue', 'data', 'view', 'edit', 'preview', 'html']);
 
-    const m1 = decoded.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
-    if (m1 && m1[1]) return m1[1];
+  const unwrapConsentUrl = (urlStr: string): string => {
+    if (!urlStr) return urlStr;
+    let current = urlStr.trim();
+    if (current.includes('consent.google.com') || current.includes('continue=')) {
+      try {
+        const match = current.match(/[?&]continue=([^&]+)/i);
+        if (match && match[1]) {
+          return decodeURIComponent(match[1]);
+        }
+      } catch (e) {}
+    }
+    return current;
+  };
 
-    const clean = decoded.trim().split('?')[0].split('#')[0];
-    const segments = clean.split('/').filter(Boolean);
-    const last = (segments[segments.length - 1] || '').trim();
-    return last;
+  const extractSignatures = (urlStr: string) => {
+    if (!urlStr) return { shortToken: '', placeId: '', coords: '' };
+    const unwrapped = unwrapConsentUrl(urlStr);
+    let decoded = unwrapped;
+    try { decoded = decodeURIComponent(unwrapped); } catch (e) {}
+
+    const shortTokenMatch = decoded.match(/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)([a-zA-Z0-9_-]+)/i);
+    let shortToken = shortTokenMatch ? shortTokenMatch[1] : '';
+
+    if (!shortToken) {
+      const clean = decoded.trim().split('?')[0].split('#')[0];
+      const segments = clean.split('/').filter(Boolean);
+      const last = (segments[segments.length - 1] || '').trim();
+      if (last && !RESERVED_WORDS.has(last.toLowerCase()) && last.length >= 6 && !last.includes('.')) {
+        shortToken = last;
+      }
+    }
+
+    const placeIdMatch = decoded.match(/1s(0x[a-f0-9]+:0x[a-f0-9]+)/i) || decoded.match(/(0x[a-f0-9]{12,}:0x[a-f0-9]{12,})/i);
+    const placeId = placeIdMatch ? placeIdMatch[1] : '';
+
+    const coordMatch = decoded.match(/(-?\d{1,3}\.\d{4,8})[\s,%+]+(-?\d{1,3}\.\d{4,8})/);
+    const coords = coordMatch ? `${parseFloat(coordMatch[1]).toFixed(4)},${parseFloat(coordMatch[2]).toFixed(4)}` : '';
+
+    return { shortToken, placeId, coords };
   };
 
   const resolveRedirectUrl = async (scannedUrl: string): Promise<string> => {
@@ -52,7 +80,7 @@ export default function UnifiedBinScanner({
       console.log('[QR Resolver] Resolving redirect for:', trimmed);
       const qr1Url = trimmed.replace('q.me-qr.com', 'qr1.me-qr.com');
 
-      // Attempt 1: Direct HTML fetch from qr1.me-qr.com
+      // Strategy 1: Direct HTML fetch from qr1.me-qr.com
       try {
         const controller = new AbortController();
         const tid = setTimeout(() => controller.abort(), 3000);
@@ -61,14 +89,14 @@ export default function UnifiedBinScanner({
         const html = await res.text();
         const mapsMatch = html.match(/https?:\/\/maps\.app\.goo\.gl\/([a-zA-Z0-9_-]+)/i);
         if (mapsMatch) {
-          console.log('[QR Resolver] Extracted maps URL from HTML:', mapsMatch[0]);
+          console.log('[QR Resolver] Found embedded maps URL in me-qr HTML:', mapsMatch[0]);
           return mapsMatch[0];
         }
       } catch (e) {
         console.warn('[QR Resolver] Direct HTML fetch failed:', e);
       }
 
-      // Attempt 2: unshorten.me API fallback
+      // Strategy 2: unshorten.me API fallback with consent unwrapping
       try {
         const controller = new AbortController();
         const tid = setTimeout(() => controller.abort(), 3500);
@@ -76,20 +104,51 @@ export default function UnifiedBinScanner({
         clearTimeout(tid);
         const json = await res.json();
         if (json && json.resolved_url) {
-          const decoded = decodeURIComponent(json.resolved_url);
-          const mapsMatch = decoded.match(/https?:\/\/maps\.app\.goo\.gl\/([a-zA-Z0-9_-]+)/i);
-          if (mapsMatch) {
-            console.log('[QR Resolver] Extracted maps URL from unshorten API:', mapsMatch[0]);
-            return mapsMatch[0];
-          }
-          return json.resolved_url;
+          const unwrapped = unwrapConsentUrl(json.resolved_url);
+          console.log('[QR Resolver] Resolved via unshorten.me API:', unwrapped);
+          return unwrapped;
         }
       } catch (e) {
         console.warn('[QR Resolver] unshorten API failed:', e);
       }
     }
 
-    return scannedUrl;
+    return unwrapConsentUrl(scannedUrl);
+  };
+
+  const matchHouse = (scannedUrl: string, resolvedUrl: string, houseList: { id: string; qr_url: string }[]) => {
+    const sigScanned = extractSignatures(scannedUrl);
+    const sigResolved = extractSignatures(resolvedUrl);
+
+    for (const h of houseList) {
+      if (!h.qr_url) continue;
+      const dbQr = h.qr_url.trim();
+
+      // Direct URL equality
+      if (dbQr === scannedUrl || dbQr === resolvedUrl) return h.id;
+
+      const sigDb = extractSignatures(dbQr);
+
+      // Short Token match
+      if (sigDb.shortToken) {
+        if (sigResolved.shortToken && sigResolved.shortToken === sigDb.shortToken) return h.id;
+        if (sigScanned.shortToken && sigScanned.shortToken === sigDb.shortToken) return h.id;
+      }
+
+      // Place ID match
+      if (sigDb.placeId) {
+        if (sigResolved.placeId && sigResolved.placeId.toLowerCase() === sigDb.placeId.toLowerCase()) return h.id;
+        if (sigScanned.placeId && sigScanned.placeId.toLowerCase() === sigDb.placeId.toLowerCase()) return h.id;
+      }
+
+      // Coordinate match
+      if (sigDb.coords) {
+        if (sigResolved.coords && sigResolved.coords === sigDb.coords) return h.id;
+        if (sigScanned.coords && sigScanned.coords === sigDb.coords) return h.id;
+      }
+    }
+
+    return null;
   };
 
   const processScannedCode = async (rawData: string): Promise<boolean> => {
@@ -114,10 +173,7 @@ export default function UnifiedBinScanner({
     const resolvedUrl = await resolveRedirectUrl(trimmed);
     console.log('[QR Scanner] Resolved URL:', resolvedUrl);
 
-    const scannedToken = getMapsToken(resolvedUrl) || getMapsToken(trimmed);
-    console.log('[QR Scanner] Maps token:', scannedToken);
-
-    // 3. Client-side token and URL matching against registered houses
+    // 3. Client-side multi-signature matching against registered houses
     try {
       const { data: houseList, error: houseErr } = await supabase
         .from('houses')
@@ -126,20 +182,11 @@ export default function UnifiedBinScanner({
       console.log('[QR Scanner] DB fetch count:', houseList?.length, 'error:', houseErr);
 
       if (houseList && houseList.length > 0) {
-        const matchedHouse = houseList.find(h => {
-          if (!h.qr_url) return false;
-          const dbQr = h.qr_url.trim();
-          // Direct exact match
-          if (dbQr === trimmed || dbQr === resolvedUrl) return true;
-          // Google Maps short-code token match
-          const dbToken = getMapsToken(dbQr);
-          return Boolean(scannedToken && dbToken && scannedToken === dbToken);
-        });
-
-        if (matchedHouse) {
-          console.log('[QR Scanner] Matched house:', matchedHouse.id);
+        const houseId = matchHouse(trimmed, resolvedUrl, houseList);
+        if (houseId) {
+          console.log('[QR Scanner] Matched house:', houseId);
           scanner.stop();
-          navigate(`/scan/${matchedHouse.id}`);
+          navigate(`/scan/${houseId}`);
           return true;
         }
       }
@@ -157,10 +204,7 @@ export default function UnifiedBinScanner({
     console.log('1. RAW QR:', JSON.stringify(trimmed));
 
     const resolvedUrl = await resolveRedirectUrl(trimmed);
-    console.log('2. RESOLVED URL:', resolvedUrl);
-
-    const scannedToken = getMapsToken(resolvedUrl) || getMapsToken(trimmed);
-    console.log('3. MAPS TOKEN:', scannedToken);
+    console.log('2. RESOLVED DESTINATION:', resolvedUrl);
 
     let houseList: { id: string; qr_url: string }[] = [];
     try {
@@ -168,26 +212,19 @@ export default function UnifiedBinScanner({
       if (res) houseList = res;
     } catch (e) {}
 
-    const matchedHouse = houseList.find(h => {
-      if (!h.qr_url) return false;
-      const dbQr = h.qr_url.trim();
-      if (dbQr === trimmed || dbQr === resolvedUrl) return true;
-      const dbToken = getMapsToken(h.qr_url);
-      return Boolean(scannedToken && dbToken && scannedToken === dbToken);
-    });
+    const directRegexHouse = (trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i))?.[1]?.toUpperCase() || null;
+    const matchedHouseId = matchHouse(trimmed, resolvedUrl, houseList) || directRegexHouse;
+    const sigResolved = extractSignatures(resolvedUrl);
 
-    const finalHouseId = matchedHouse ? matchedHouse.id : (
-      (trimmed.match(/\/scan\/(H\d+)/i) || trimmed.match(/^(H\d+)$/i))?.[1]?.toUpperCase() || null
-    );
-
-    console.log('4. MATCHED HOUSE:', finalHouseId || 'NONE');
+    console.log('3. MATCHED HOUSE:', matchedHouseId || 'NONE');
 
     setDebugState({
       raw: data,
       resolved: resolvedUrl,
-      token: scannedToken,
-      matchedHouseId: finalHouseId,
-      dbMatch: Boolean(finalHouseId),
+      token: sigResolved.shortToken || sigResolved.placeId || sigResolved.coords || '(none)',
+      matchedHouseId: matchedHouseId,
+      dbMatch: Boolean(matchedHouseId),
+      failureReason: matchedHouseId ? null : 'Could not match short token, place ID, or coordinates against registered public.houses records.',
     });
 
     const success = await processScannedCode(data);
@@ -230,10 +267,13 @@ export default function UnifiedBinScanner({
         <div className="mt-3 p-3 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono border border-slate-700 space-y-1 text-left">
           <div className="font-bold text-amber-400 border-b border-slate-800 pb-1">⚡ RUNTIME DEBUG PANEL</div>
           <div className="truncate"><span className="text-slate-400">RAW QR VALUE:</span> {debugState.raw || '(none)'}</div>
-          <div className="truncate"><span className="text-slate-400">RESOLVED URL:</span> {debugState.resolved || '(none)'}</div>
+          <div className="truncate"><span className="text-slate-400">RESOLVED DESTINATION:</span> {debugState.resolved || '(none)'}</div>
           <div><span className="text-slate-400">EXTRACTED TOKEN:</span> {debugState.token || '(none)'}</div>
           <div><span className="text-slate-400">DB MATCH:</span> {debugState.dbMatch ? '✅ TRUE' : '❌ FALSE'}</div>
-          <div><span className="text-slate-400">HOUSE:</span> {debugState.matchedHouseId || 'NONE'}</div>
+          <div><span className="text-slate-400">MATCHED HOUSE:</span> {debugState.matchedHouseId || 'NONE'}</div>
+          {debugState.failureReason && (
+            <div className="text-rose-400 pt-1 border-t border-slate-800"><span className="font-bold">FAILURE REASON:</span> {debugState.failureReason}</div>
+          )}
         </div>
       )}
 
