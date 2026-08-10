@@ -233,6 +233,8 @@ export async function rescheduleSchedule(
   });
 }
 
+import { awardGreenPoints } from '@/lib/greenPointsService';
+
 /**
  * Mark active schedule as completed when worker scans/collects house waste
  */
@@ -241,12 +243,20 @@ export async function completeScheduleForHouse(houseId: string, dateStr?: string
   const nowIso = new Date().toISOString();
 
   try {
-    await supabase
+    const { data: updatedSchedules } = await supabase
       .from('pickup_schedules')
       .update({ status: 'completed', completed_at: nowIso, updated_at: nowIso })
       .eq('house_id', houseId)
       .eq('scheduled_date', targetDate)
-      .eq('status', 'scheduled');
+      .eq('status', 'scheduled')
+      .select();
+
+    if (updatedSchedules && updatedSchedules.length > 0) {
+      for (const sched of updatedSchedules) {
+        // Award +50 Green Points for completing scheduled pickup
+        await awardGreenPoints('scheduled_pickup_completed', sched.id, houseId);
+      }
+    }
   } catch (err) {
     console.warn('[pickupScheduleService] Complete schedule DB update fallback:', err);
   }

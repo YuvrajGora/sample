@@ -6,6 +6,7 @@ import {
 import { Badge } from '@/components/ui/Primitives';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { awardGreenPoints } from '@/lib/greenPointsService';
 
 type Phase = 'capture' | 'form' | 'processing' | 'result';
 
@@ -86,9 +87,10 @@ export default function ReportIssue({ onClose }: { onClose: () => void }) {
   const startProcessing = () => {
     setPhase('processing');
     setProgress(0);
-    
+
     // Save complaint to the real Supabase database
     const house_id = user?.house_id || null;
+    const resident_id = user?.id || null;
     const reporter_email = user?.email || 'anonymous@cleanos.city';
     const reporter_name = user?.name || 'Anonymous';
     
@@ -104,10 +106,14 @@ export default function ReportIssue({ onClose }: { onClose: () => void }) {
       status: sampleResult.status,
       summary: sampleResult.summary,
       image_data: capturedImage,
-      house_id
-    }).then(({ error }) => {
+      house_id,
+      resident_id
+    }).select().single().then(({ data, error }) => {
       if (error) {
         console.error('Failed to save complaint to Supabase:', error.message);
+      } else if (data?.id) {
+        // Award Green Points (+10) for filing waste report
+        awardGreenPoints('issue_reported', data.id, house_id || undefined);
       }
     });
 

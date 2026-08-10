@@ -9,6 +9,7 @@ import {
 type Status = 'loading' | 'not-found' | 'ready' | 'submitting' | 'success' | 'error';
 
 import { completeScheduleForHouse } from '@/lib/pickupScheduleService';
+import { awardGreenPoints } from '@/lib/greenPointsService';
 
 const ALLOWED_RADIUS_METERS = 50; // Configurable verification radius
 
@@ -138,6 +139,11 @@ export default function ScanPage() {
 
     setHouse({ ...house, collection_status: 'Collected', last_collected: now });
     await completeScheduleForHouse(house.id);
+    
+    // Award Green Points for daily waste collection
+    const todayStr = new Date().toISOString().split('T')[0];
+    await awardGreenPoints('daily_collection', todayStr, house.id);
+    
     setStatus('success');
   }, [house, status, alreadyCollected, coords]);
 

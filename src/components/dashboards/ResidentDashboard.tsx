@@ -12,9 +12,16 @@ import {
 } from '@/lib/pickupScheduleService';
 import type { PickupSchedule } from '@/lib/supabase';
 import {
+  fetchResidentGreenPoints,
+  subscribeToGreenPoints,
+  type GreenPointsLedgerItem,
+  type EcoRankInfo,
+  calculateEcoRank,
+} from '@/lib/greenPointsService';
+import {
   Leaf, Plus, Truck, Award, Activity, Bell, Clock, MapPin, CheckCircle2,
   Star, AlertTriangle, Recycle, Sparkles, ChevronRight, ClipboardList, Loader2, Navigation,
-  Calendar, XCircle, RefreshCw
+  Calendar, XCircle, RefreshCw, Zap
 } from '@/lib/icons';
 
 type HouseDetails = {
@@ -68,6 +75,17 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [greenPoints, setGreenPoints] = useState<number>(0);
+  const [pointsLedger, setPointsLedger] = useState<GreenPointsLedgerItem[]>([]);
+  const [ecoRank, setEcoRank] = useState<EcoRankInfo>(calculateEcoRank(0));
+
+  const loadPoints = async () => {
+    if (!user?.id) return;
+    const summary = await fetchResidentGreenPoints(user.id);
+    setGreenPoints(summary.points);
+    setPointsLedger(summary.ledger);
+    setEcoRank(summary.rank);
+  };
 
   const loadSchedule = async () => {
     if (!user?.house_id) return;
@@ -124,8 +142,8 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
       if (notifErr) throw notifErr;
       setNotifications(notifData || []);
 
-      // 5. Fetch active pickup schedule
-      await loadSchedule();
+      // 5. Fetch active pickup schedule & Green Points
+      await Promise.all([loadSchedule(), loadPoints()]);
 
     } catch (e: any) {
       console.error(e);
@@ -138,6 +156,14 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
   useEffect(() => {
     fetchData();
   }, [user?.house_id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const unsub = subscribeToGreenPoints(user.id, () => {
+      loadPoints();
+    });
+    return () => unsub();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.house_id) return;
@@ -191,6 +217,63 @@ export default function ResidentDashboard({ onOpenAI }: { onOpenAI: () => void }
             <Badge status={house?.lane || 'Lane A'} />
           </div>
         </div>
+      </div>
+
+      {/* Green Points & Eco Rank Card */}
+      <div className="glass-card p-5 sm:p-6 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/20 relative overflow-hidden animate-fade-up">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
+              <Leaf size={24} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                  Green Points & Eco Rewards
+                </p>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                  {ecoRank.badge}
+                </span>
+              </div>
+              <p className="text-2xl font-black font-display text-primary-c mt-0.5 flex items-center gap-1.5">
+                {greenPoints.toLocaleString()} <span className="text-xs font-semibold text-muted-c">PTS</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="w-full sm:w-48 space-y-1.5">
+            <div className="flex justify-between text-[11px] font-semibold text-secondary-c">
+              <span>{ecoRank.level}</span>
+              <span>{ecoRank.nextPoints ? `${greenPoints}/${ecoRank.nextPoints} PTS` : 'MAX LEVEL'}</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-400 to-teal-500 transition-all duration-500 rounded-full"
+                style={{ width: `${ecoRank.progressPct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Points Activity List */}
+        {pointsLedger.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-c">Recent Eco Reward Activity</p>
+            <div className="space-y-1.5 max-h-32 overflow-y-auto no-scrollbar">
+              {pointsLedger.slice(0, 3).map((item) => (
+                <div key={item.id} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-emerald-500/5 dark:bg-emerald-950/20">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="font-medium text-primary-c truncate">{item.description}</span>
+                  </div>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0 ml-2">
+                    +{item.points} PTS
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quick Actions */}

@@ -54,3 +54,14 @@ export type PickupSchedule = {
   cancelled_at?: string | null;
 };
 
+export type GreenPointsLedger = {
+  id: string;
+  resident_id: string;
+  house_id: string | null;
+  points: number;
+  action_type: string;
+  description: string;
+  reference_id: string;
+  created_at: string;
+};
+
